@@ -1,6 +1,8 @@
 ﻿
 using Microsoft.AspNetCore.Mvc;
-using Npgsql;
+using CitiesApi.Models;
+using CitiesApi.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace CitiesApi.Controllers
 {
@@ -8,81 +10,69 @@ namespace CitiesApi.Controllers
     [Route("api/cities")]
     public class CitiesController : ControllerBase
     {
-        private readonly string connectionString =
-            "Host=localhost;Port=5432;Database=staj;Username=postgres;Password=123456";
+        private readonly ApplicationDbContext _context;
+
+        public CitiesController(ApplicationDbContext context)
+        {
+            _context = context;
+        }
 
 
-
+        
+        // POST: api/cities/bulk
         [HttpPost("bulk")]
         public async Task<IActionResult> BulkInsert(
             [FromBody] List<CityInput> cities)
-        {
-            if (cities == null || cities.Count == 0)
-            {
-                return BadRequest(new
                 {
-                    message = "En az bir şehir göndermelisiniz."
-                });
-            }
-
-            await using var connection =
-                new NpgsqlConnection(connectionString);
-
-            await connection.OpenAsync();
-
-            await using var transaction =
-                await connection.BeginTransactionAsync();
-
-            try
-            {
-                foreach (var city in cities)
-                {
-                    await using var command = new NpgsqlCommand(
-                        """
-                        INSERT INTO cities
-                            ("name", "platecode", "description", "isactive")
-                        VALUES
-                            (@name, @platecode, @description, @isactive)
-                        """,
-                        connection,
-                        transaction);
-
-                    command.Parameters.AddWithValue("name", city.Name);
-                    command.Parameters.AddWithValue("platecode", city.PlateCode);
-                    command.Parameters.AddWithValue("description", city.Description);
-                    command.Parameters.AddWithValue("isactive", city.IsActive);
-
-                    await command.ExecuteNonQueryAsync();
-                }
-
-                await transaction.CommitAsync();
-
-                return Ok(new
-                {
-                    message = "Şehirler başarıyla eklendi.",
-                    count = cities.Count
-                });
-            }
-            catch (PostgresException ex)
-            {
-                await transaction.RollbackAsync();
-
-                if (ex.SqlState == "23505")
-                {
-                    return Conflict(new
+                    if (cities == null || cities.Count == 0)
                     {
-                        message = "Bu plaka kodlarından biri zaten kayıtlı."
-                    });
+                        return BadRequest(new
+                        {
+                            message = "En az bir şehir göndermelisiniz."
+                        });
+                    }
+
+                    var plateCodes = cities.Select(c => c.PlateCode).ToList();
+
+                    var hasExistingCity = await _context.Cities
+                        .AnyAsync(c => plateCodes.Contains(c.PlateCode));
+
+                    if (hasExistingCity || plateCodes.Distinct().Count() != plateCodes.Count)
+                    {
+                        return Conflict(new
+                        {
+                            message = "Bu plaka kodlarından biri zaten kayıtlı veya gönderilen listede tekrarlanıyor."
+                        });
+                    }
+
+                    var newCities = cities.Select(c => new City
+                    {
+                        Name = c.Name,
+                        PlateCode = c.PlateCode,
+                        Description = c.Description,
+                        IsActive = c.IsActive
+                    }).ToList();
+
+                    try
+                    {
+                        await _context.Cities.AddRangeAsync(newCities);
+                        await _context.SaveChangesAsync();
+
+                        return Ok(new
+                        {
+                            message = "Şehirler başarıyla eklendi.",
+                            count = newCities.Count
+                        });
+                    }
+                    catch (DbUpdateException)
+                    {
+                        return Conflict(new
+                        {
+                            message = "Şehirler eklenemedi. Plaka kodlarını ve veritabanı kısıtlamalarını kontrol edin."
+                        });
+                    }
                 }
 
-                return StatusCode(500, new
-                {
-                    message = "Veritabanına kayıt sırasında hata oluştu.",
-                    detail = ex.Message,
-                    sqlState = ex.SqlState
-                });
-            }
-        }
 
 
 
@@ -90,25 +80,19 @@ namespace CitiesApi.Controllers
         [HttpGet("{platecode:int}")]
         public async Task<IActionResult> GetCityByPlateCode(int platecode)
         {
-            await using var connection =
-                new NpgsqlConnection(connectionString);
+            var city = await _context.Cities
+                .AsNoTracking()
+                .Where(c => c.PlateCode == platecode)
+                .Select(c => new
+                {
+                    name = c.Name,
+                    plateCode = c.PlateCode,
+                    description = c.Description,
+                    isActive = c.IsActive
+                })
+                .FirstOrDefaultAsync();
 
-            await connection.OpenAsync();
-
-            const string sql = """
-                SELECT "name", "platecode", "description", "isactive"
-                FROM cities
-                WHERE "platecode" = @plateCode
-                """;
-
-            await using var command =
-                new NpgsqlCommand(sql, connection);
-
-            command.Parameters.AddWithValue("platecode", platecode);
-
-            await using var reader = await command.ExecuteReaderAsync();
-
-            if (!await reader.ReadAsync())
+            if (city == null)
             {
                 return NotFound(new
                 {
@@ -116,23 +100,16 @@ namespace CitiesApi.Controllers
                 });
             }
 
-            var city = new
-            {
-                name = reader.GetString(0),
-                plateCode = reader.GetInt32(1),
-                description = reader.GetString(2),
-                isActive = reader.GetBoolean(3)
-            };
-
             return Ok(city);
         }
 
 
 
         // PUT: api/cities/34
+
         [HttpPut("{plateCode:int}")]
         public async Task<IActionResult> UpdateCity(
-            int platecode,
+            int plateCode,
             [FromBody] CityUpdate city)
         {
             if (city == null)
@@ -143,30 +120,10 @@ namespace CitiesApi.Controllers
                 });
             }
 
-            await using var connection =
-                new NpgsqlConnection(connectionString);
+            var existingCity = await _context.Cities
+                .FirstOrDefaultAsync(c => c.PlateCode == plateCode);
 
-            await connection.OpenAsync();
-
-            const string sql = """
-                UPDATE cities
-                SET "name" = @name,
-                    "description" = @description,
-                    "isactive" = @isactive
-                WHERE "platecode" = @plateCode
-                """;
-
-            await using var command =
-                new NpgsqlCommand(sql, connection);
-
-            command.Parameters.AddWithValue("name", city.Name);
-            command.Parameters.AddWithValue("description", city.Description);
-            command.Parameters.AddWithValue("isactive", city.IsActive);
-            command.Parameters.AddWithValue("platecode", platecode);
-
-            int affectedRows = await command.ExecuteNonQueryAsync();
-
-            if (affectedRows == 0)
+            if (existingCity == null)
             {
                 return NotFound(new
                 {
@@ -174,19 +131,27 @@ namespace CitiesApi.Controllers
                 });
             }
 
+            existingCity.Name = city.Name;
+            existingCity.Description = city.Description;
+            existingCity.IsActive = city.IsActive;
+
+            await _context.SaveChangesAsync();
+
             return Ok(new
             {
                 message = "Şehir bilgileri başarıyla güncellendi.",
-                plateCode = platecode,
-                name = city.Name,
-                description = city.Description,
-                isActive = city.IsActive
+                plateCode = existingCity.PlateCode,
+                name = existingCity.Name,
+                description = existingCity.Description,
+                isActive = existingCity.IsActive
             });
         }
 
 
 
+
         // PATCH: api/cities/34/status
+
         [HttpPatch("{plateCode:int}/status")]
         public async Task<IActionResult> ChangeCityStatus(
             int plateCode,
@@ -200,29 +165,10 @@ namespace CitiesApi.Controllers
                 });
             }
 
-            await using var connection =
-                new NpgsqlConnection(connectionString);
+            var city = await _context.Cities
+                .FirstOrDefaultAsync(c => c.PlateCode == plateCode);
 
-            await connection.OpenAsync();
-
-            const string sql = """
-                UPDATE cities
-                SET "isactive" = @isActive
-                WHERE "platecode" = @plateCode
-                """;
-
-            await using var command =
-                new NpgsqlCommand(sql, connection);
-
-            command.Parameters.AddWithValue(
-                "isactive", request.IsActive);
-
-            command.Parameters.AddWithValue(
-                "platecode", plateCode);
-
-            int affectedRows = await command.ExecuteNonQueryAsync();
-
-            if (affectedRows == 0)
+            if (city == null)
             {
                 return NotFound(new
                 {
@@ -230,85 +176,54 @@ namespace CitiesApi.Controllers
                 });
             }
 
+            city.IsActive = request.IsActive;
+
+            await _context.SaveChangesAsync();
+
             return Ok(new
             {
                 message = request.IsActive
                     ? "Şehir aktif duruma getirildi."
                     : "Şehir pasif duruma getirildi.",
-                plateCode = plateCode,
-                isActive = request.IsActive
+                plateCode = city.PlateCode,
+                isActive = city.IsActive
             });
         }
 
 
+
+        
         // GET: api/cities/search?keyword=hamsi
         [HttpGet("search")]
         public async Task<IActionResult> SearchCities(
             [FromQuery] string keyword)
-        {
-            if (string.IsNullOrWhiteSpace(keyword))
-            {
-                return BadRequest(new
                 {
-                    message = "Aranacak kelime boş olamaz."
-                });
+                    if (string.IsNullOrWhiteSpace(keyword))
+                    {
+                        return BadRequest(new
+                        {
+                            message = "Aranacak kelime boş olamaz."
+                        });
+                    }
+
+                    var cities = await _context.Cities
+                        .AsNoTracking()
+                        .Where(c => EF.Functions.ILike(c.Description, $"%{keyword}%"))
+                        .OrderBy(c => c.PlateCode)
+                        .Select(c => new
+                        {
+                            name = c.Name,
+                            plateCode = c.PlateCode,
+                            description = c.Description,
+                            isActive = c.IsActive
+                        })
+                        .ToListAsync();
+
+                    return Ok(cities);
+                }
+
             }
 
-            await using var connection =
-                new NpgsqlConnection(connectionString);
-
-            await connection.OpenAsync();
-
-            const string sql = """
-        SELECT "name", "platecode", "description", "isactive"
-        FROM cities
-        WHERE "description" ILIKE @keyword
-        ORDER BY "platecode"
-        """;
-
-            await using var command =
-                new NpgsqlCommand(sql, connection);
-
-            command.Parameters.AddWithValue("keyword", $"%{keyword}%");
-
-            await using var reader = await command.ExecuteReaderAsync();
-
-            var cities = new List<object>();
-
-            while (await reader.ReadAsync())
-            {
-                cities.Add(new
-                {
-                    name = reader.GetString(0),
-                    plateCode = reader.GetInt32(1),
-                    description = reader.GetString(2),
-                    isActive = reader.GetBoolean(3)
-                });
-            }
-
-            return Ok(cities);
-        }
-
-    }
-
-    public class CityInput
-    {
-        public string Name { get; set; } = string.Empty;
-        public int PlateCode { get; set; }
-        public string Description { get; set; } = string.Empty;
-        public bool IsActive { get; set; }
-    }
-
-    public class CityUpdate
-    {
-        public string Name { get; set; } = string.Empty;
-        public string Description { get; set; } = string.Empty;
-        public bool IsActive { get; set; }
-    }
-
-    public class CityStatusUpdate
-    {
-        public bool IsActive { get; set; }
-    }
+   
 }
 
