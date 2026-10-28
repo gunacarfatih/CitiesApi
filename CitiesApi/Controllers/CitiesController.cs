@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using CitiesApi.Models;
 using CitiesApi.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace CitiesApi.Controllers
 {
@@ -11,14 +12,17 @@ namespace CitiesApi.Controllers
     public class CitiesController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly IMemoryCache _memoryCache;
+        private const string CityCacheVersionKey = "cities_cache_version";
 
-        public CitiesController(ApplicationDbContext context)
+        public CitiesController(ApplicationDbContext context, IMemoryCache memoryCache)
         {
             _context = context;
+            _memoryCache = memoryCache;
         }
 
 
-        
+
         // POST: api/cities/bulk
         [HttpPost("bulk")]
         public async Task<IActionResult> BulkInsert(
@@ -57,6 +61,7 @@ namespace CitiesApi.Controllers
                     {
                         await _context.Cities.AddRangeAsync(newCities);
                         await _context.SaveChangesAsync();
+                        ClearCache();
 
                         return Ok(new
                         {
@@ -80,6 +85,13 @@ namespace CitiesApi.Controllers
         [HttpGet("{platecode:int}")]
         public async Task<IActionResult> GetCityByPlateCode(int platecode)
         {
+            string cacheKey = $"city_{GetCacheVersion()}_{platecode}";
+
+            if (_memoryCache.TryGetValue(cacheKey, out object? cachedCity))
+            {
+                return Ok(cachedCity);
+            }
+
             var city = await _context.Cities
                 .AsNoTracking()
                 .Where(c => c.PlateCode == platecode)
@@ -100,9 +112,10 @@ namespace CitiesApi.Controllers
                 });
             }
 
+            _memoryCache.Set(cacheKey, city, TimeSpan.FromMinutes(60));
+
             return Ok(city);
         }
-
 
 
         // PUT: api/cities/34
@@ -136,6 +149,7 @@ namespace CitiesApi.Controllers
             existingCity.IsActive = city.IsActive;
 
             await _context.SaveChangesAsync();
+            ClearCache();
 
             return Ok(new
             {
@@ -179,6 +193,7 @@ namespace CitiesApi.Controllers
             city.IsActive = request.IsActive;
 
             await _context.SaveChangesAsync();
+            ClearCache();
 
             return Ok(new
             {
@@ -206,7 +221,14 @@ namespace CitiesApi.Controllers
                         });
                     }
 
-                    var cities = await _context.Cities
+            string cacheKey = $"city_search_{GetCacheVersion()}_{keyword.Trim().ToLowerInvariant()}";
+
+            if (_memoryCache.TryGetValue(cacheKey, out object? cachedCities))
+            {
+                return Ok(cachedCities);
+            }
+
+            var cities = await _context.Cities
                         .AsNoTracking()
                         .Where(c => EF.Functions.ILike(c.Description, $"%{keyword}%"))
                         .OrderBy(c => c.PlateCode)
@@ -219,11 +241,31 @@ namespace CitiesApi.Controllers
                         })
                         .ToListAsync();
 
-                    return Ok(cities);
+            _memoryCache.Set(cacheKey, cities, TimeSpan.FromMinutes(60));
+
+            return Ok(cities);
                 }
 
-            }
+        private string GetCacheVersion()
+        {
+            return _memoryCache.GetOrCreate(
+                CityCacheVersionKey,
+                entry =>
+                {
+                    entry.SetAbsoluteExpiration(TimeSpan.FromDays(365));
+                    return Guid.NewGuid().ToString();
+                })!;
+        }
 
+        private void ClearCache()
+        {
+            _memoryCache.Set(
+                CityCacheVersionKey,
+                Guid.NewGuid().ToString(),
+                TimeSpan.FromDays(365));
+        }
+
+    }
    
 }
 
