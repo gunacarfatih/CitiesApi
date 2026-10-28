@@ -13,12 +13,15 @@ namespace CitiesApi.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IMemoryCache _memoryCache;
+        private readonly int _cacheDurationMinutes;
         private const string CityCacheVersionKey = "cities_cache_version";
 
-        public CitiesController(ApplicationDbContext context, IMemoryCache memoryCache)
+        public CitiesController(ApplicationDbContext context, IMemoryCache memoryCache, IConfiguration configuration)
         {
             _context = context;
             _memoryCache = memoryCache;
+
+            _cacheDurationMinutes = configuration.GetValue<int>("CacheSettings:DurationMinutes");
         }
 
 
@@ -112,7 +115,7 @@ namespace CitiesApi.Controllers
                 });
             }
 
-            _memoryCache.Set(cacheKey, city, TimeSpan.FromMinutes(60));
+            _memoryCache.Set(cacheKey, city, TimeSpan.FromMinutes(_cacheDurationMinutes));
 
             return Ok(city);
         }
@@ -241,7 +244,7 @@ namespace CitiesApi.Controllers
                         })
                         .ToListAsync();
 
-            _memoryCache.Set(cacheKey, cities, TimeSpan.FromMinutes(60));
+            _memoryCache.Set(cacheKey, cities, TimeSpan.FromMinutes(_cacheDurationMinutes));
 
             return Ok(cities);
                 }
