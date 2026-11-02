@@ -1,9 +1,7 @@
 
 using CitiesApi.Data;
-using CitiesApi.Services;
 using CitiesApi.Middlewares;
 using Microsoft.EntityFrameworkCore;
-using StackExchange.Redis;
 using Serilog;
 using ReusableCaching.Extensions;
 
@@ -22,18 +20,6 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddControllers();
 
 builder.Services.AddReusableCaching(builder.Configuration);
-
-// Redis Connection
-builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
-{
-    var connectionString =
-        builder.Configuration.GetConnectionString("Redis");
-
-    return ConnectionMultiplexer.Connect(connectionString!);
-});
-
-// Distributed Lock
-builder.Services.AddSingleton<RedisDistributedLock>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

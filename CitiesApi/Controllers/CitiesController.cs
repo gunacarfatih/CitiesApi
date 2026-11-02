@@ -1,7 +1,5 @@
-﻿using CitiesApi.Controllers;
-using CitiesApi.Data;
+﻿using CitiesApi.Data;
 using CitiesApi.Models;
-using CitiesApi.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ReusableCaching.Interfaces;
@@ -15,8 +13,7 @@ namespace CitiesApi.Controllers
         private readonly ApplicationDbContext _context;
         private readonly ICacheService _cacheService;
         private const string CityCacheVersionKey = "cities_cache_version_v2";
-        private static readonly TimeSpan CacheVersionDuration =
-            TimeSpan.FromDays(365);
+        private static readonly TimeSpan CacheVersionDuration = TimeSpan.FromDays(365);
         private readonly ILogger<CitiesController> _logger;
 
         public CitiesController(
@@ -28,6 +25,7 @@ namespace CitiesApi.Controllers
             _cacheService = cacheService;
             _logger = logger;
         }
+
 
         // POST: api/cities/bulk
         [HttpPost("bulk")]
@@ -42,57 +40,57 @@ namespace CitiesApi.Controllers
                 });
             }
 
- 
+            var plateCodes = cities.Select(c => c.PlateCode).ToList();
+
+            var hasExistingCity = await _context.Cities
+                .AnyAsync(c => plateCodes.Contains(c.PlateCode));
+
+            if (hasExistingCity ||
+                plateCodes.Distinct().Count() != plateCodes.Count)
+            {
+                return Conflict(new
+                {
+                    message = "Bu plaka kodlarından biri zaten kayıtlı veya gönderilen listede tekrarlanıyor."
+                });
+            }
+
+            var newCities = cities.Select(c => new City
+            {
+                Name = c.Name,
+                PlateCode = c.PlateCode,
+                Description = c.Description,
+                IsActive = c.IsActive
+            }).ToList();
+
             try
             {
-                var plateCodes = cities.Select(c => c.PlateCode).ToList();
+                await _context.Cities.AddRangeAsync(newCities);
+                await _context.SaveChangesAsync();
 
-                var hasExistingCity = await _context.Cities
-                    .AnyAsync(c => plateCodes.Contains(c.PlateCode));
+                await ClearCacheAsync();
 
-                if (hasExistingCity ||
-                    plateCodes.Distinct().Count() != plateCodes.Count)
+                _logger.LogInformation(
+                    "Bulk city insert completed. Count: {Count}",
+                    newCities.Count);
+
+                return Ok(new
                 {
-                    return Conflict(new
-                    {
-                        message = "Bu plaka kodlarından biri zaten kayıtlı veya gönderilen listede tekrarlanıyor."
-                    });
-                }
-
-                var newCities = cities.Select(c => new City
-                {
-                    Name = c.Name,
-                    PlateCode = c.PlateCode,
-                    Description = c.Description,
-                    IsActive = c.IsActive
-                }).ToList();
-
-                try
-                {
-                    await _context.Cities.AddRangeAsync(newCities);
-                    await _context.SaveChangesAsync();
-
-                    await ClearCacheAsync();
-
-                    return Ok(new
-                    {
-                        message = "Şehirler başarıyla eklendi.",
-                        count = newCities.Count
-                    });
-                }
-                catch (DbUpdateException)
-                {
-                    return Conflict(new
-                    {
-                        message = "Şehirler eklenemedi. Plaka kodlarını ve veritabanı kısıtlamalarını kontrol edin."
-                    });
-                }
+                    message = "Şehirler başarıyla eklendi.",
+                    count = newCities.Count
+                });
             }
-            finally
+            catch (DbUpdateException ex)
             {
+                _logger.LogWarning(ex,
+                    "Bulk city insert failed due to database constraints.");
 
+                return Conflict(new
+                {
+                    message = "Şehirler eklenemedi. Plaka kodlarını ve veritabanı kısıtlamalarını kontrol edin."
+                });
             }
         }
+
 
         // GET: api/cities/34
         [HttpGet("{platecode:int}")]
@@ -125,6 +123,7 @@ namespace CitiesApi.Controllers
 
             return Ok(city);
         }
+
 
         // PUT: api/cities/34
         [HttpPut("{plateCode:int}")]
@@ -173,6 +172,7 @@ namespace CitiesApi.Controllers
             });
         }
 
+
         // PATCH: api/cities/34/status
         [HttpPatch("{plateCode:int}/status")]
         public async Task<IActionResult> ChangeCityStatus(
@@ -213,6 +213,7 @@ namespace CitiesApi.Controllers
             });
         }
 
+
         // GET: api/cities/search?keyword=hamsi
         [HttpGet("search")]
         public async Task<IActionResult> SearchCities(
@@ -243,7 +244,7 @@ namespace CitiesApi.Controllers
             var cities = await _context.Cities
                 .AsNoTracking()
                 .Where(c => EF.Functions.ILike(
-                    c.Description, $"%{keyword.Trim()}%"))
+                    c.Description, $"%{normalizedKeyword}%"))
                 .OrderBy(c => c.PlateCode)
                 .ToListAsync();
 
@@ -251,6 +252,7 @@ namespace CitiesApi.Controllers
 
             return Ok(cities);
         }
+
 
         // GET: api/cities/cache/34
         [HttpGet("cache/{plateCode:int}")]
@@ -272,6 +274,7 @@ namespace CitiesApi.Controllers
             return Ok(city);
         }
 
+
         private async Task<string> GetCacheVersionAsync()
         {
             string? version =
@@ -291,6 +294,7 @@ namespace CitiesApi.Controllers
             return version;
         }
 
+
         private async Task ClearCacheAsync()
         {
             string newVersion = Guid.NewGuid().ToString();
@@ -300,5 +304,6 @@ namespace CitiesApi.Controllers
                 newVersion,
                 CacheVersionDuration);
         }
+
     }
 }
