@@ -1,9 +1,10 @@
-﻿
-using Microsoft.AspNetCore.Mvc;
-using CitiesApi.Models;
+﻿using CitiesApi.Controllers;
 using CitiesApi.Data;
+using CitiesApi.Models;
+using CitiesApi.Services;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
+using ReusableCaching.Interfaces;
 
 namespace CitiesApi.Controllers
 {
@@ -12,100 +13,105 @@ namespace CitiesApi.Controllers
     public class CitiesController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        private readonly IMemoryCache _memoryCache;
-        private readonly int _cacheDurationMinutes;
-        private const string CityCacheVersionKey = "cities_cache_version";
+        private readonly ICacheService _cacheService;
+        private const string CityCacheVersionKey = "cities_cache_version_v2";
+        private static readonly TimeSpan CacheVersionDuration =
+            TimeSpan.FromDays(365);
+        private readonly ILogger<CitiesController> _logger;
 
-        public CitiesController(ApplicationDbContext context, IMemoryCache memoryCache, IConfiguration configuration)
+        public CitiesController(
+            ApplicationDbContext context,
+            ICacheService cacheService,
+            ILogger<CitiesController> logger)
         {
             _context = context;
-            _memoryCache = memoryCache;
-
-            _cacheDurationMinutes = configuration.GetValue<int>("CacheSettings:DurationMinutes");
+            _cacheService = cacheService;
+            _logger = logger;
         }
-
-
 
         // POST: api/cities/bulk
         [HttpPost("bulk")]
         public async Task<IActionResult> BulkInsert(
             [FromBody] List<CityInput> cities)
+        {
+            if (cities == null || cities.Count == 0)
+            {
+                return BadRequest(new
                 {
-                    if (cities == null || cities.Count == 0)
+                    message = "En az bir şehir göndermelisiniz."
+                });
+            }
+
+ 
+            try
+            {
+                var plateCodes = cities.Select(c => c.PlateCode).ToList();
+
+                var hasExistingCity = await _context.Cities
+                    .AnyAsync(c => plateCodes.Contains(c.PlateCode));
+
+                if (hasExistingCity ||
+                    plateCodes.Distinct().Count() != plateCodes.Count)
+                {
+                    return Conflict(new
                     {
-                        return BadRequest(new
-                        {
-                            message = "En az bir şehir göndermelisiniz."
-                        });
-                    }
-
-                    var plateCodes = cities.Select(c => c.PlateCode).ToList();
-
-                    var hasExistingCity = await _context.Cities
-                        .AnyAsync(c => plateCodes.Contains(c.PlateCode));
-
-                    if (hasExistingCity || plateCodes.Distinct().Count() != plateCodes.Count)
-                    {
-                        return Conflict(new
-                        {
-                            message = "Bu plaka kodlarından biri zaten kayıtlı veya gönderilen listede tekrarlanıyor."
-                        });
-                    }
-
-                    var newCities = cities.Select(c => new City
-                    {
-                        Name = c.Name,
-                        PlateCode = c.PlateCode,
-                        Description = c.Description,
-                        IsActive = c.IsActive
-                    }).ToList();
-
-                    try
-                    {
-                        await _context.Cities.AddRangeAsync(newCities);
-                        await _context.SaveChangesAsync();
-                        ClearCache();
-
-                        return Ok(new
-                        {
-                            message = "Şehirler başarıyla eklendi.",
-                            count = newCities.Count
-                        });
-                    }
-                    catch (DbUpdateException)
-                    {
-                        return Conflict(new
-                        {
-                            message = "Şehirler eklenemedi. Plaka kodlarını ve veritabanı kısıtlamalarını kontrol edin."
-                        });
-                    }
+                        message = "Bu plaka kodlarından biri zaten kayıtlı veya gönderilen listede tekrarlanıyor."
+                    });
                 }
 
+                var newCities = cities.Select(c => new City
+                {
+                    Name = c.Name,
+                    PlateCode = c.PlateCode,
+                    Description = c.Description,
+                    IsActive = c.IsActive
+                }).ToList();
 
+                try
+                {
+                    await _context.Cities.AddRangeAsync(newCities);
+                    await _context.SaveChangesAsync();
 
+                    await ClearCacheAsync();
+
+                    return Ok(new
+                    {
+                        message = "Şehirler başarıyla eklendi.",
+                        count = newCities.Count
+                    });
+                }
+                catch (DbUpdateException)
+                {
+                    return Conflict(new
+                    {
+                        message = "Şehirler eklenemedi. Plaka kodlarını ve veritabanı kısıtlamalarını kontrol edin."
+                    });
+                }
+            }
+            finally
+            {
+
+            }
+        }
 
         // GET: api/cities/34
         [HttpGet("{platecode:int}")]
         public async Task<IActionResult> GetCityByPlateCode(int platecode)
         {
-            string cacheKey = $"city_{GetCacheVersion()}_{platecode}";
+            string cacheKey =
+                $"city_{await GetCacheVersionAsync()}_{platecode}";
 
-            if (_memoryCache.TryGetValue(cacheKey, out object? cachedCity))
+            var cachedCity =
+                await _cacheService.GetAsync<City>(cacheKey);
+
+            if (cachedCity != null)
             {
                 return Ok(cachedCity);
             }
 
             var city = await _context.Cities
                 .AsNoTracking()
-                .Where(c => c.PlateCode == platecode)
-                .Select(c => new
-                {
-                    name = c.Name,
-                    plateCode = c.PlateCode,
-                    description = c.Description,
-                    isActive = c.IsActive
-                })
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(c => c.PlateCode == platecode);
 
             if (city == null)
             {
@@ -115,14 +121,12 @@ namespace CitiesApi.Controllers
                 });
             }
 
-            _memoryCache.Set(cacheKey, city, TimeSpan.FromMinutes(_cacheDurationMinutes));
+            await _cacheService.SetAsync(cacheKey, city);
 
             return Ok(city);
         }
 
-
         // PUT: api/cities/34
-
         [HttpPut("{plateCode:int}")]
         public async Task<IActionResult> UpdateCity(
             int plateCode,
@@ -152,7 +156,12 @@ namespace CitiesApi.Controllers
             existingCity.IsActive = city.IsActive;
 
             await _context.SaveChangesAsync();
-            ClearCache();
+            _logger.LogInformation(
+                "City updated. PlateCode: {PlateCode}, CityName: {CityName}, IsActive: {IsActive}",
+                existingCity.PlateCode,
+                existingCity.Name,
+                existingCity.IsActive);
+            await ClearCacheAsync();
 
             return Ok(new
             {
@@ -164,11 +173,7 @@ namespace CitiesApi.Controllers
             });
         }
 
-
-
-
         // PATCH: api/cities/34/status
-
         [HttpPatch("{plateCode:int}/status")]
         public async Task<IActionResult> ChangeCityStatus(
             int plateCode,
@@ -196,7 +201,7 @@ namespace CitiesApi.Controllers
             city.IsActive = request.IsActive;
 
             await _context.SaveChangesAsync();
-            ClearCache();
+            await ClearCacheAsync();
 
             return Ok(new
             {
@@ -208,67 +213,92 @@ namespace CitiesApi.Controllers
             });
         }
 
-
-
-        
         // GET: api/cities/search?keyword=hamsi
         [HttpGet("search")]
         public async Task<IActionResult> SearchCities(
             [FromQuery] string keyword)
+        {
+            if (string.IsNullOrWhiteSpace(keyword))
+            {
+                return BadRequest(new
                 {
-                    if (string.IsNullOrWhiteSpace(keyword))
-                    {
-                        return BadRequest(new
-                        {
-                            message = "Aranacak kelime boş olamaz."
-                        });
-                    }
+                    message = "Aranacak kelime boş olamaz."
+                });
+            }
 
-            string cacheKey = $"city_search_{GetCacheVersion()}_{keyword.Trim().ToLowerInvariant()}";
+            string normalizedKeyword =
+                keyword.Trim().ToLowerInvariant();
 
-            if (_memoryCache.TryGetValue(cacheKey, out object? cachedCities))
+            string cacheKey =
+                $"city_search_{await GetCacheVersionAsync()}_{normalizedKeyword}";
+
+            var cachedCities =
+                await _cacheService.GetAsync<List<City>>(cacheKey);
+
+            if (cachedCities != null)
             {
                 return Ok(cachedCities);
             }
 
             var cities = await _context.Cities
-                        .AsNoTracking()
-                        .Where(c => EF.Functions.ILike(c.Description, $"%{keyword}%"))
-                        .OrderBy(c => c.PlateCode)
-                        .Select(c => new
-                        {
-                            name = c.Name,
-                            plateCode = c.PlateCode,
-                            description = c.Description,
-                            isActive = c.IsActive
-                        })
-                        .ToListAsync();
+                .AsNoTracking()
+                .Where(c => EF.Functions.ILike(
+                    c.Description, $"%{keyword.Trim()}%"))
+                .OrderBy(c => c.PlateCode)
+                .ToListAsync();
 
-            _memoryCache.Set(cacheKey, cities, TimeSpan.FromMinutes(_cacheDurationMinutes));
+            await _cacheService.SetAsync(cacheKey, cities);
 
             return Ok(cities);
-                }
+        }
 
-        private string GetCacheVersion()
+        // GET: api/cities/cache/34
+        [HttpGet("cache/{plateCode:int}")]
+        public async Task<IActionResult> GetFromCache(int plateCode)
         {
-            return _memoryCache.GetOrCreate(
-                CityCacheVersionKey,
-                entry =>
+            string cacheKey =
+                $"city_{await GetCacheVersionAsync()}_{plateCode}";
+
+            var city = await _cacheService.GetAsync<City>(cacheKey);
+
+            if (city == null)
+            {
+                return NotFound(new
                 {
-                    entry.SetAbsoluteExpiration(TimeSpan.FromDays(365));
-                    return Guid.NewGuid().ToString();
-                })!;
+                    message = "Şehir cache içerisinde bulunamadı."
+                });
+            }
+
+            return Ok(city);
         }
 
-        private void ClearCache()
+        private async Task<string> GetCacheVersionAsync()
         {
-            _memoryCache.Set(
-                CityCacheVersionKey,
-                Guid.NewGuid().ToString(),
-                TimeSpan.FromDays(365));
+            string? version =
+                await _cacheService.GetAsync<string>(
+                    CityCacheVersionKey);
+
+            if (version == null)
+            {
+                version = Guid.NewGuid().ToString();
+
+                await _cacheService.SetAsync(
+                    CityCacheVersionKey,
+                    version,
+                    CacheVersionDuration);
+            }
+
+            return version;
         }
 
-    }
-   
-}
+        private async Task ClearCacheAsync()
+        {
+            string newVersion = Guid.NewGuid().ToString();
 
+            await _cacheService.SetAsync(
+                CityCacheVersionKey,
+                newVersion,
+                CacheVersionDuration);
+        }
+    }
+}

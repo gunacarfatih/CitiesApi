@@ -1,3 +1,4 @@
 <Solution>
+  <Project Path="CacheProvider/ReusableCaching.csproj" Id="88d3d47f-b595-4392-a0c0-8139bc211b86" />
   <Project Path="CitiesApi/CitiesApi.csproj" />
 </Solution>
