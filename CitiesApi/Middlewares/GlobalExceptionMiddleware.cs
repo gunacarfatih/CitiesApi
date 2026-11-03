@@ -29,7 +29,6 @@ namespace CitiesApi.Middlewares
                     ex,
                     "Beklenmeyen bir hata oluştu."
                 );
-
                 if (context.Response.HasStarted)
                 {
                     throw;

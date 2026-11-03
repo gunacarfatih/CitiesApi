@@ -1,5 +1,4 @@
-﻿
-using CitiesApi.Models;
+﻿using CitiesApi.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace CitiesApi.Data
@@ -13,6 +12,7 @@ namespace CitiesApi.Data
         }
 
         public DbSet<City> Cities => Set<City>();
+        public DbSet<User> Users => Set<User>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

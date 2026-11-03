@@ -480,3 +480,14 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# User Secrets and local configuration
+secrets.json
+**/secrets.json
+
+# Environment variables
+.env
+.env.*
+
+# Application logs
+Logs/

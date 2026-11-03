@@ -3,11 +3,13 @@ using CitiesApi.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ReusableCaching.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 
 namespace CitiesApi.Controllers
 {
     [ApiController]
     [Route("api/cities")]
+    [Authorize]
     public class CitiesController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
