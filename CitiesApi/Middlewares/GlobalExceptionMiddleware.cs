@@ -1,4 +1,4 @@
-﻿
+﻿using CitiesApi.Responses;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
@@ -27,8 +27,8 @@ namespace CitiesApi.Middlewares
             {
                 _logger.LogError(
                     ex,
-                    "Beklenmeyen bir hata oluştu."
-                );
+                    "Beklenmeyen bir hata oluştu.");
+
                 if (context.Response.HasStarted)
                 {
                     throw;
@@ -42,16 +42,18 @@ namespace CitiesApi.Middlewares
                 context.Response.ContentType =
                     "application/json";
 
-                var response = new
+                var response = new BaseResponse<object>
                 {
-                    statusCode = 500,
-                    message = "Beklenmeyen bir hata oluştu.",
-                    success = false,
-                    traceId = context.TraceIdentifier
+                    Success = false,
+                    Message = "Beklenmeyen bir hata oluştu.",
+                    Status = StatusCodes.Status500InternalServerError,
+                    ErrorCode = "INTERNAL_SERVER_ERROR",
+                    TraceId = context.TraceIdentifier
                 };
 
                 await context.Response.WriteAsJsonAsync(response);
             }
         }
+
     }
 }

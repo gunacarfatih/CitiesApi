@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ReusableCaching.Interfaces;
 using Microsoft.AspNetCore.Authorization;
+using CitiesApi.Responses;
 
 namespace CitiesApi.Controllers
 {
@@ -31,14 +32,17 @@ namespace CitiesApi.Controllers
 
         // POST: api/cities/bulk
         [HttpPost("bulk")]
-        public async Task<IActionResult> BulkInsert(
-            [FromBody] List<CityInput> cities)
+        public async Task<IActionResult> BulkInsert([FromBody] List<CityInput> cities)
         {
             if (cities == null || cities.Count == 0)
             {
-                return BadRequest(new
+                return BadRequest(new BaseResponse<object>
                 {
-                    message = "En az bir şehir göndermelisiniz."
+                    Success = false,
+                    Message = "En az bir şehir göndermelisiniz.",
+                    Status = StatusCodes.Status400BadRequest,
+                    ErrorCode = "EMPTY_CITY_LIST",
+                    TraceId = HttpContext.TraceIdentifier
                 });
             }
 
@@ -47,12 +51,15 @@ namespace CitiesApi.Controllers
             var hasExistingCity = await _context.Cities
                 .AnyAsync(c => plateCodes.Contains(c.PlateCode));
 
-            if (hasExistingCity ||
-                plateCodes.Distinct().Count() != plateCodes.Count)
+            if (hasExistingCity || plateCodes.Distinct().Count() != plateCodes.Count)
             {
-                return Conflict(new
+                return Conflict(new BaseResponse<object>
                 {
-                    message = "Bu plaka kodlarından biri zaten kayıtlı veya gönderilen listede tekrarlanıyor."
+                    Success = false,
+                    Message = "Bu plaka kodlarından biri zaten kayıtlı veya gönderilen listede tekrarlanıyor.",
+                    Status = StatusCodes.Status409Conflict,
+                    ErrorCode = "DUPLICATE_PLATE_CODE",
+                    TraceId = HttpContext.TraceIdentifier
                 });
             }
 
@@ -68,17 +75,22 @@ namespace CitiesApi.Controllers
             {
                 await _context.Cities.AddRangeAsync(newCities);
                 await _context.SaveChangesAsync();
-
                 await ClearCacheAsync();
 
                 _logger.LogInformation(
                     "Bulk city insert completed. Count: {Count}",
                     newCities.Count);
 
-                return Ok(new
+                return Ok(new BaseResponse<object>
                 {
-                    message = "Şehirler başarıyla eklendi.",
-                    count = newCities.Count
+                    Success = true,
+                    Message = "Şehirler başarıyla eklendi.",
+                    Status = StatusCodes.Status200OK,
+                    Data = new
+                    {
+                        Count = newCities.Count
+                    },
+                    TraceId = HttpContext.TraceIdentifier
                 });
             }
             catch (DbUpdateException ex)
@@ -86,9 +98,13 @@ namespace CitiesApi.Controllers
                 _logger.LogWarning(ex,
                     "Bulk city insert failed due to database constraints.");
 
-                return Conflict(new
+                return Conflict(new BaseResponse<object>
                 {
-                    message = "Şehirler eklenemedi. Plaka kodlarını ve veritabanı kısıtlamalarını kontrol edin."
+                    Success = false,
+                    Message = "Şehirler eklenemedi. Plaka kodlarını ve veritabanı kısıtlamalarını kontrol edin.",
+                    Status = StatusCodes.Status409Conflict,
+                    ErrorCode = "DATABASE_CONSTRAINT_ERROR",
+                    TraceId = HttpContext.TraceIdentifier
                 });
             }
         }
@@ -106,7 +122,14 @@ namespace CitiesApi.Controllers
 
             if (cachedCity != null)
             {
-                return Ok(cachedCity);
+                return Ok(new BaseResponse<City>
+                {
+                    Success = true,
+                    Message = "Şehir başarıyla getirildi.",
+                    Status = StatusCodes.Status200OK,
+                    Data = cachedCity,
+                    TraceId = HttpContext.TraceIdentifier
+                });
             }
 
             var city = await _context.Cities
@@ -115,15 +138,26 @@ namespace CitiesApi.Controllers
 
             if (city == null)
             {
-                return NotFound(new
+                return NotFound(new BaseResponse<City>
                 {
-                    message = "Bu plaka koduna ait şehir bulunamadı."
+                    Success = false,
+                    Message = "Bu plaka koduna ait şehir bulunamadı.",
+                    Status = StatusCodes.Status404NotFound,
+                    ErrorCode = "CITY_NOT_FOUND",
+                    TraceId = HttpContext.TraceIdentifier
                 });
             }
 
             await _cacheService.SetAsync(cacheKey, city);
 
-            return Ok(city);
+            return Ok(new BaseResponse<City>
+            {
+                Success = true,
+                Message = "Şehir başarıyla getirildi.",
+                Status = StatusCodes.Status200OK,
+                Data = city,
+                TraceId = HttpContext.TraceIdentifier
+            });
         }
 
 
@@ -135,9 +169,13 @@ namespace CitiesApi.Controllers
         {
             if (city == null)
             {
-                return BadRequest(new
+                return BadRequest(new BaseResponse<object>
                 {
-                    message = "Güncellenecek şehir bilgileri gönderilmelidir."
+                    Success = false,
+                    Message = "Güncellenecek şehir bilgileri gönderilmelidir.",
+                    Status = StatusCodes.Status400BadRequest,
+                    ErrorCode = "INVALID_CITY_DATA",
+                    TraceId = HttpContext.TraceIdentifier
                 });
             }
 
@@ -146,9 +184,13 @@ namespace CitiesApi.Controllers
 
             if (existingCity == null)
             {
-                return NotFound(new
+                return NotFound(new BaseResponse<object>
                 {
-                    message = "Bu plaka koduna ait şehir bulunamadı."
+                    Success = false,
+                    Message = "Bu plaka koduna ait şehir bulunamadı.",
+                    Status = StatusCodes.Status404NotFound,
+                    ErrorCode = "CITY_NOT_FOUND",
+                    TraceId = HttpContext.TraceIdentifier
                 });
             }
 
@@ -157,20 +199,22 @@ namespace CitiesApi.Controllers
             existingCity.IsActive = city.IsActive;
 
             await _context.SaveChangesAsync();
+
             _logger.LogInformation(
                 "City updated. PlateCode: {PlateCode}, CityName: {CityName}, IsActive: {IsActive}",
                 existingCity.PlateCode,
                 existingCity.Name,
                 existingCity.IsActive);
+
             await ClearCacheAsync();
 
-            return Ok(new
+            return Ok(new BaseResponse<City>
             {
-                message = "Şehir bilgileri başarıyla güncellendi.",
-                plateCode = existingCity.PlateCode,
-                name = existingCity.Name,
-                description = existingCity.Description,
-                isActive = existingCity.IsActive
+                Success = true,
+                Message = "Şehir bilgileri başarıyla güncellendi.",
+                Status = StatusCodes.Status200OK,
+                Data = existingCity,
+                TraceId = HttpContext.TraceIdentifier
             });
         }
 
@@ -183,9 +227,13 @@ namespace CitiesApi.Controllers
         {
             if (request == null)
             {
-                return BadRequest(new
+                return BadRequest(new BaseResponse<object>
                 {
-                    message = "Aktiflik durumu gönderilmelidir."
+                    Success = false,
+                    Message = "Aktiflik durumu gönderilmelidir.",
+                    Status = StatusCodes.Status400BadRequest,
+                    ErrorCode = "INVALID_STATUS_DATA",
+                    TraceId = HttpContext.TraceIdentifier
                 });
             }
 
@@ -194,9 +242,13 @@ namespace CitiesApi.Controllers
 
             if (city == null)
             {
-                return NotFound(new
+                return NotFound(new BaseResponse<object>
                 {
-                    message = "Bu plaka koduna ait şehir bulunamadı."
+                    Success = false,
+                    Message = "Bu plaka koduna ait şehir bulunamadı.",
+                    Status = StatusCodes.Status404NotFound,
+                    ErrorCode = "CITY_NOT_FOUND",
+                    TraceId = HttpContext.TraceIdentifier
                 });
             }
 
@@ -205,32 +257,41 @@ namespace CitiesApi.Controllers
             await _context.SaveChangesAsync();
             await ClearCacheAsync();
 
-            return Ok(new
+            _logger.LogInformation(
+                "City status changed. PlateCode: {PlateCode}, IsActive: {IsActive}",
+                city.PlateCode,
+                city.IsActive);
+
+            return Ok(new BaseResponse<City>
             {
-                message = request.IsActive
+                Success = true,
+                Message = request.IsActive
                     ? "Şehir aktif duruma getirildi."
                     : "Şehir pasif duruma getirildi.",
-                plateCode = city.PlateCode,
-                isActive = city.IsActive
+                Status = StatusCodes.Status200OK,
+                Data = city,
+                TraceId = HttpContext.TraceIdentifier
             });
         }
 
 
         // GET: api/cities/search?keyword=hamsi
         [HttpGet("search")]
-        public async Task<IActionResult> SearchCities(
-            [FromQuery] string keyword)
+        public async Task<IActionResult> SearchCities([FromQuery] string keyword)
         {
             if (string.IsNullOrWhiteSpace(keyword))
             {
-                return BadRequest(new
+                return BadRequest(new BaseResponse<object>
                 {
-                    message = "Aranacak kelime boş olamaz."
+                    Success = false,
+                    Message = "Aranacak kelime boş olamaz.",
+                    Status = StatusCodes.Status400BadRequest,
+                    ErrorCode = "EMPTY_SEARCH_KEYWORD",
+                    TraceId = HttpContext.TraceIdentifier
                 });
             }
 
-            string normalizedKeyword =
-                keyword.Trim().ToLowerInvariant();
+            string normalizedKeyword = keyword.Trim().ToLowerInvariant();
 
             string cacheKey =
                 $"city_search_{await GetCacheVersionAsync()}_{normalizedKeyword}";
@@ -240,7 +301,14 @@ namespace CitiesApi.Controllers
 
             if (cachedCities != null)
             {
-                return Ok(cachedCities);
+                return Ok(new BaseResponse<List<City>>
+                {
+                    Success = true,
+                    Message = "Şehirler başarıyla arandı.",
+                    Status = StatusCodes.Status200OK,
+                    Data = cachedCities,
+                    TraceId = HttpContext.TraceIdentifier
+                });
             }
 
             var cities = await _context.Cities
@@ -252,7 +320,16 @@ namespace CitiesApi.Controllers
 
             await _cacheService.SetAsync(cacheKey, cities);
 
-            return Ok(cities);
+            return Ok(new BaseResponse<List<City>>
+            {
+                Success = true,
+                Message = cities.Count > 0
+                    ? "Şehirler başarıyla arandı."
+                    : "Aramayla eşleşen şehir bulunamadı.",
+                Status = StatusCodes.Status200OK,
+                Data = cities,
+                TraceId = HttpContext.TraceIdentifier
+            });
         }
 
 
@@ -267,15 +344,104 @@ namespace CitiesApi.Controllers
 
             if (city == null)
             {
-                return NotFound(new
+                return NotFound(new BaseResponse<object>
                 {
-                    message = "Şehir cache içerisinde bulunamadı."
+                    Success = false,
+                    Message = "Şehir cache içerisinde bulunamadı.",
+                    Status = StatusCodes.Status404NotFound,
+                    ErrorCode = "CITY_NOT_IN_CACHE",
+                    TraceId = HttpContext.TraceIdentifier
                 });
             }
 
-            return Ok(city);
+            return Ok(new BaseResponse<City>
+            {
+                Success = true,
+                Message = "Şehir cache içerisinden başarıyla getirildi.",
+                Status = StatusCodes.Status200OK,
+                Data = city,
+                TraceId = HttpContext.TraceIdentifier
+            });
         }
 
+
+        // GET: api/cities?page=1&pageSize=10
+        [HttpGet]
+        public async Task<IActionResult> GetCities(
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 10)
+        {
+            if (page < 1 || pageSize < 1 || pageSize > 100)
+            {
+                return BadRequest(new BaseResponse<object>
+                {
+                    Success = false,
+                    Message = "Sayfa numarası en az 1, sayfa boyutu ise 1 ile 100 arasında olmalıdır.",
+                    Status = StatusCodes.Status400BadRequest,
+                    ErrorCode = "INVALID_PAGINATION_PARAMETERS",
+                    TraceId = HttpContext.TraceIdentifier
+                });
+            }
+
+            // Cache sürümünü al
+            string cacheVersion = await GetCacheVersionAsync();
+
+            // Sayfa ve sayfa boyutuna özel cache anahtarı
+            string cacheKey =
+                $"cities_page_{cacheVersion}_{page}_{pageSize}";
+
+            // Önce cache kontrolü
+            var cities = await _cacheService.GetAsync<List<City>>(cacheKey);
+            if (cities != null)
+            {
+                _logger.LogInformation(
+                    "Cities pagination cache HIT. Page: {Page}, PageSize: {PageSize}",
+                    page,
+                    pageSize);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Cities pagination cache MISS. Page: {Page}, PageSize: {PageSize}",
+                    page,
+                    pageSize);
+            }
+
+            // Cache boşsa veritabanından getir
+            if (cities == null)
+            {
+                cities = await _context.Cities
+                    .AsNoTracking()
+                    .OrderBy(c => c.PlateCode)
+                    .Skip((page - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToListAsync();
+
+                await _cacheService.SetAsync(cacheKey, cities);
+            }
+
+            // Toplam kayıt sayısı
+            int totalCount = await _context.Cities.CountAsync();
+
+            var response = new BasePagedResponse<List<City>>
+            {
+                Success = true,
+                Message = "Şehirler başarıyla listelendi.",
+                Status = StatusCodes.Status200OK,
+                Data = cities,
+                Pagination = new PaginationMetadata
+                {
+                    Page = page,
+                    PageSize = pageSize,
+                    TotalCount = totalCount,
+                    TotalPages = (int)Math.Ceiling(
+                        totalCount / (double)pageSize)
+                },
+                TraceId = HttpContext.TraceIdentifier
+            };
+
+            return Ok(response);
+        }
 
         private async Task<string> GetCacheVersionAsync()
         {
@@ -295,7 +461,6 @@ namespace CitiesApi.Controllers
 
             return version;
         }
-
 
         private async Task ClearCacheAsync()
         {

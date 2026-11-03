@@ -12,14 +12,18 @@ namespace CitiesApi.Middlewares
             _next = next;
         }
 
+
         public async Task InvokeAsync(HttpContext context)
         {
-            var correlationId = context.Request.Headers[HeaderName].FirstOrDefault();
+            var correlationId =
+                context.Request.Headers[HeaderName].FirstOrDefault();
 
             if (string.IsNullOrWhiteSpace(correlationId))
             {
                 correlationId = Guid.NewGuid().ToString();
             }
+
+            context.TraceIdentifier = correlationId;
 
             context.Response.Headers[HeaderName] = correlationId;
 
@@ -28,5 +32,6 @@ namespace CitiesApi.Middlewares
                 await _next(context);
             }
         }
+
     }
 }

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using CitiesApi.Data;
 using Microsoft.AspNetCore.Mvc;
+using CitiesApi.Responses;
 
 namespace CitiesApi.Controllers
 {
@@ -35,9 +36,13 @@ namespace CitiesApi.Controllers
 
             if (usernameExists)
             {
-                return BadRequest(new
+                return BadRequest(new BaseResponse<object>
                 {
-                    message = "Bu kullanıcı adı zaten kullanılıyor."
+                    Success = false,
+                    Message = "Bu kullanıcı adı zaten kullanılıyor.",
+                    Status = StatusCodes.Status400BadRequest,
+                    ErrorCode = "USERNAME_ALREADY_EXISTS",
+                    TraceId = HttpContext.TraceIdentifier
                 });
             }
 
@@ -59,14 +64,21 @@ namespace CitiesApi.Controllers
 
             await _context.SaveChangesAsync();
 
-            return Ok(new
+            return Ok(new BaseResponse<object>
             {
-                message = "Kullanıcı başarıyla oluşturuldu.",
-                userId = user.Id,
-                username = user.UserName,
-                email = user.Email
+                Success = true,
+                Message = "Kullanıcı başarıyla oluşturuldu.",
+                Status = StatusCodes.Status200OK,
+                Data = new
+                {
+                    UserId = user.Id,
+                    Username = user.UserName,
+                    Email = user.Email
+                },
+                TraceId = HttpContext.TraceIdentifier
             });
         }
+
 
         [HttpPost("login")]
         public async Task<IActionResult> Login(
@@ -75,19 +87,15 @@ namespace CitiesApi.Controllers
             var user = await _context.Users
                 .FirstOrDefaultAsync(u => u.UserName == request.UserName);
 
-            if (user == null)
+            if (user == null || !user.IsActive)
             {
-                return Unauthorized(new
+                return Unauthorized(new BaseResponse<object>
                 {
-                    message = "Kullanıcı adı veya şifre hatalı."
-                });
-            }
-
-            if (!user.IsActive)
-            {
-                return Unauthorized(new
-                {
-                    message = "Bu kullanıcı hesabı pasif durumda."
+                    Success = false,
+                    Message = "Kullanıcı adı veya şifre hatalı.",
+                    Status = StatusCodes.Status401Unauthorized,
+                    ErrorCode = "INVALID_CREDENTIALS",
+                    TraceId = HttpContext.TraceIdentifier
                 });
             }
 
@@ -98,20 +106,30 @@ namespace CitiesApi.Controllers
 
             if (passwordResult == PasswordVerificationResult.Failed)
             {
-                return Unauthorized(new
+                return Unauthorized(new BaseResponse<object>
                 {
-                    message = "Kullanıcı adı veya şifre hatalı."
+                    Success = false,
+                    Message = "Kullanıcı adı veya şifre hatalı.",
+                    Status = StatusCodes.Status401Unauthorized,
+                    ErrorCode = "INVALID_CREDENTIALS",
+                    TraceId = HttpContext.TraceIdentifier
                 });
             }
 
             var token = _tokenService.CreateToken(user);
 
-            return Ok(new
+            return Ok(new BaseResponse<object>
             {
-                message = "Giriş başarılı.",
-                userId = user.Id,
-                username = user.UserName,
-                accessToken = token
+                Success = true,
+                Message = "Giriş başarılı.",
+                Status = StatusCodes.Status200OK,
+                Data = new
+                {
+                    UserId = user.Id,
+                    Username = user.UserName,
+                    AccessToken = token
+                },
+                TraceId = HttpContext.TraceIdentifier
             });
         }
 
