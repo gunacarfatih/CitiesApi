@@ -25,7 +25,11 @@ namespace CitiesApi.Middlewares
 
             context.TraceIdentifier = correlationId;
 
-            context.Response.Headers[HeaderName] = correlationId;
+            context.Response.OnStarting(() =>
+            {
+                context.Response.Headers[HeaderName] = correlationId;
+                return Task.CompletedTask;
+            });
 
             using (LogContext.PushProperty("CorrelationId", correlationId))
             {

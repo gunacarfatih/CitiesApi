@@ -1,5 +1,4 @@
-﻿
-namespace CitiesApi.Configurations
+﻿namespace CitiesApi.Configurations
 {
     public class JwtSettings
     {

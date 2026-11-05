@@ -27,7 +27,8 @@ namespace CitiesApi.Middlewares
             {
                 _logger.LogError(
                     ex,
-                    "Beklenmeyen bir hata oluştu.");
+                    "Unhandled exception occurred. TraceId: {TraceId}",
+                    context.TraceIdentifier);
 
                 if (context.Response.HasStarted)
                 {

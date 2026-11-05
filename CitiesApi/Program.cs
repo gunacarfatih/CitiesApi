@@ -1,19 +1,31 @@
-
+// .NET
 using System.Text;
+
+// ASP.NET Core
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+
+// Entity Framework Core
+using Microsoft.EntityFrameworkCore;
+
+// JWT
+using Microsoft.IdentityModel.Tokens;
+
+// Swagger
+using Microsoft.OpenApi;
+
+// Third-party
+using ReusableCaching.Extensions;
+using Serilog;
+
+// Project
 using CitiesApi.Configurations;
 using CitiesApi.Data;
 using CitiesApi.Middlewares;
 using CitiesApi.Models;
-using CitiesApi.Services;
 using CitiesApi.Responses;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Identity;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi;
-using ReusableCaching.Extensions;
-using Serilog;
-using Microsoft.AspNetCore.Mvc;
+using CitiesApi.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,7 +34,10 @@ builder.Services.AddCors(options =>
     options.AddPolicy("FrontendPolicy", policy =>
     {
         policy
-            .WithOrigins("http://127.0.0.1:5500")
+            .WithOrigins(
+                "http://127.0.0.1:5500",
+                "http://localhost:5500"
+            )
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -184,53 +199,67 @@ builder.Services.AddSwaggerGen(options =>
         });
 });
 
+
 var app = builder.Build();
+
+// 1. Correlation ID
+app.UseMiddleware<CorrelationIdMiddleware>();
+
+// 2. Serilog Request Logging
+app.UseSerilogRequestLogging();
+
+// 3. Global Exception Handling
+app.UseMiddleware<GlobalExceptionMiddleware>();
+
+// 4. Status Code Pages
 app.UseStatusCodePages(async context =>
 {
+    var httpContext = context.HttpContext;
+    var statusCode = httpContext.Response.StatusCode;
+
+    var isNotFound = statusCode == StatusCodes.Status404NotFound;
+
     var response = new BaseResponse<object>
     {
         Success = false,
-        Message = context.HttpContext.Response.StatusCode == 404
+        Message = isNotFound
             ? "İstenen adres bulunamadı."
             : "İstek işlenirken bir hata oluştu.",
-        Status = context.HttpContext.Response.StatusCode,
-        ErrorCode = context.HttpContext.Response.StatusCode == 404
+
+        Status = statusCode,
+
+        ErrorCode = isNotFound
             ? "ENDPOINT_NOT_FOUND"
             : "HTTP_ERROR",
-        TraceId = context.HttpContext.TraceIdentifier
+
+        TraceId = httpContext.TraceIdentifier
     };
 
-    context.HttpContext.Response.ContentType = "application/json";
+    httpContext.Response.ContentType = "application/json";
 
-    await context.HttpContext.Response.WriteAsJsonAsync(response);
+    await httpContext.Response.WriteAsJsonAsync(response);
 });
 
-// Correlation ID
-app.UseMiddleware<CorrelationIdMiddleware>();
-
-// Global Exception Handling
-app.UseMiddleware<GlobalExceptionMiddleware>();
-
-// Swagger
+// 5. Swagger
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-// Serilog Request Logging
-app.UseSerilogRequestLogging();
-
-app.UseCors("FrontendPolicy");
-
-// HTTPS
+// 6. HTTPS
 app.UseHttpsRedirection();
 
-// Authentication ve Authorization
+// 7. CORS
+app.UseCors("FrontendPolicy");
+
+// 8. Authentication
 app.UseAuthentication();
+
+// 9. Authorization
 app.UseAuthorization();
 
-// Controllers
+// 10. Controllers
 app.MapControllers();
 
 app.Run();
