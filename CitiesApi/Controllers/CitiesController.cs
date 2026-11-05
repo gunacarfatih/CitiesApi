@@ -1,10 +1,10 @@
 ﻿using CitiesApi.Data;
-using CitiesApi.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ReusableCaching.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using CitiesApi.Responses;
+using CitiesApi.Models;
 
 namespace CitiesApi.Controllers
 {
@@ -32,7 +32,9 @@ namespace CitiesApi.Controllers
 
         // POST: api/cities/bulk
         [HttpPost("bulk")]
-        public async Task<IActionResult> BulkInsert([FromBody] List<CityInput> cities)
+        public async Task<IActionResult> BulkInsert(
+            [FromBody] List<CityInput> cities,
+            CancellationToken cancellationToken)
         {
             if (cities == null || cities.Count == 0)
             {
@@ -49,7 +51,7 @@ namespace CitiesApi.Controllers
             var plateCodes = cities.Select(c => c.PlateCode).ToList();
 
             var hasExistingCity = await _context.Cities
-                .AnyAsync(c => plateCodes.Contains(c.PlateCode));
+                .AnyAsync(c => plateCodes.Contains(c.PlateCode), cancellationToken);
 
             if (hasExistingCity || plateCodes.Distinct().Count() != plateCodes.Count)
             {
@@ -73,8 +75,8 @@ namespace CitiesApi.Controllers
 
             try
             {
-                await _context.Cities.AddRangeAsync(newCities);
-                await _context.SaveChangesAsync();
+                await _context.Cities.AddRangeAsync(newCities, cancellationToken);
+                await _context.SaveChangesAsync(cancellationToken);
                 await ClearCacheAsync();
 
                 _logger.LogInformation(
@@ -112,13 +114,15 @@ namespace CitiesApi.Controllers
 
         // GET: api/cities/34
         [HttpGet("{platecode:int}")]
-        public async Task<IActionResult> GetCityByPlateCode(int platecode)
+        public async Task<IActionResult> GetCityByPlateCode(
+            int platecode,
+            CancellationToken cancellationToken)
         {
             string cacheKey =
-                $"city_{await GetCacheVersionAsync()}_{platecode}";
+                $"city_{await GetCacheVersionAsync(cancellationToken)}_{platecode}";
 
             var cachedCity =
-                await _cacheService.GetAsync<City>(cacheKey);
+                await _cacheService.GetAsync<City>(cacheKey, cancellationToken);
 
             if (cachedCity != null)
             {
@@ -134,7 +138,7 @@ namespace CitiesApi.Controllers
 
             var city = await _context.Cities
                 .AsNoTracking()
-                .FirstOrDefaultAsync(c => c.PlateCode == platecode);
+                .FirstOrDefaultAsync(c => c.PlateCode == platecode, cancellationToken);
 
             if (city == null)
             {
@@ -148,7 +152,7 @@ namespace CitiesApi.Controllers
                 });
             }
 
-            await _cacheService.SetAsync(cacheKey, city);
+            await _cacheService.SetAsync(cacheKey, city, null, cancellationToken);
 
             return Ok(new BaseResponse<City>
             {
@@ -165,7 +169,8 @@ namespace CitiesApi.Controllers
         [HttpPut("{plateCode:int}")]
         public async Task<IActionResult> UpdateCity(
             int plateCode,
-            [FromBody] CityUpdate city)
+            [FromBody] CityUpdate city,
+            CancellationToken cancellationToken)
         {
             if (city == null)
             {
@@ -180,7 +185,7 @@ namespace CitiesApi.Controllers
             }
 
             var existingCity = await _context.Cities
-                .FirstOrDefaultAsync(c => c.PlateCode == plateCode);
+                .FirstOrDefaultAsync(c => c.PlateCode == plateCode, cancellationToken);
 
             if (existingCity == null)
             {
@@ -198,7 +203,7 @@ namespace CitiesApi.Controllers
             existingCity.Description = city.Description;
             existingCity.IsActive = city.IsActive;
 
-            await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation(
                 "City updated. PlateCode: {PlateCode}, CityName: {CityName}, IsActive: {IsActive}",
@@ -223,7 +228,8 @@ namespace CitiesApi.Controllers
         [HttpPatch("{plateCode:int}/status")]
         public async Task<IActionResult> ChangeCityStatus(
             int plateCode,
-            [FromBody] CityStatusUpdate request)
+            [FromBody] CityStatusUpdate request,
+            CancellationToken cancellationToken)
         {
             if (request == null)
             {
@@ -238,7 +244,7 @@ namespace CitiesApi.Controllers
             }
 
             var city = await _context.Cities
-                .FirstOrDefaultAsync(c => c.PlateCode == plateCode);
+                .FirstOrDefaultAsync(c => c.PlateCode == plateCode, cancellationToken);
 
             if (city == null)
             {
@@ -254,7 +260,7 @@ namespace CitiesApi.Controllers
 
             city.IsActive = request.IsActive;
 
-            await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync(cancellationToken);
             await ClearCacheAsync();
 
             _logger.LogInformation(
@@ -275,9 +281,56 @@ namespace CitiesApi.Controllers
         }
 
 
+        // DELETE: api/cities/34
+        [HttpDelete("{plateCode:int}")]
+        public async Task<IActionResult> DeleteCity(
+            int plateCode,
+            CancellationToken cancellationToken)
+        {
+            var city = await _context.Cities
+                .FirstOrDefaultAsync(
+                    c => c.PlateCode == plateCode,
+                    cancellationToken);
+
+            if (city == null)
+            {
+                return NotFound(new BaseResponse<object>
+                {
+                    Success = false,
+                    Message = "Silinecek şehir bulunamadı.",
+                    Status = StatusCodes.Status404NotFound,
+                    ErrorCode = "CITY_NOT_FOUND",
+                    TraceId = HttpContext.TraceIdentifier
+                });
+            }
+
+            _context.Cities.Remove(city);
+
+            await _context.SaveChangesAsync(cancellationToken);
+
+            await ClearCacheAsync();
+
+            _logger.LogInformation(
+                "City deleted. PlateCode: {PlateCode}, CityName: {CityName}",
+                city.PlateCode,
+                city.Name);
+
+            return Ok(new BaseResponse<City>
+            {
+                Success = true,
+                Message = "Şehir başarıyla silindi.",
+                Status = StatusCodes.Status200OK,
+                Data = city,
+                TraceId = HttpContext.TraceIdentifier
+            });
+        }
+
+
         // GET: api/cities/search?keyword=hamsi
         [HttpGet("search")]
-        public async Task<IActionResult> SearchCities([FromQuery] string keyword)
+        public async Task<IActionResult> SearchCities(
+            [FromQuery] string keyword,
+            CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(keyword))
             {
@@ -294,10 +347,10 @@ namespace CitiesApi.Controllers
             string normalizedKeyword = keyword.Trim().ToLowerInvariant();
 
             string cacheKey =
-                $"city_search_{await GetCacheVersionAsync()}_{normalizedKeyword}";
+                $"city_search_{await GetCacheVersionAsync(cancellationToken)}_{normalizedKeyword}";
 
             var cachedCities =
-                await _cacheService.GetAsync<List<City>>(cacheKey);
+                await _cacheService.GetAsync<List<City>>(cacheKey, cancellationToken);
 
             if (cachedCities != null)
             {
@@ -313,12 +366,13 @@ namespace CitiesApi.Controllers
 
             var cities = await _context.Cities
                 .AsNoTracking()
-                .Where(c => EF.Functions.ILike(
-                    c.Description, $"%{normalizedKeyword}%"))
+                .Where(c =>
+                    EF.Functions.ILike(c.Name, $"%{normalizedKeyword}%") ||
+                    EF.Functions.ILike(c.Description, $"%{normalizedKeyword}%"))
                 .OrderBy(c => c.PlateCode)
-                .ToListAsync();
+                .ToListAsync(cancellationToken);
 
-            await _cacheService.SetAsync(cacheKey, cities);
+            await _cacheService.SetAsync(cacheKey, cities, null, cancellationToken);
 
             return Ok(new BaseResponse<List<City>>
             {
@@ -335,12 +389,14 @@ namespace CitiesApi.Controllers
 
         // GET: api/cities/cache/34
         [HttpGet("cache/{plateCode:int}")]
-        public async Task<IActionResult> GetFromCache(int plateCode)
+        public async Task<IActionResult> GetFromCache(
+            int plateCode,
+            CancellationToken cancellationToken)
         {
             string cacheKey =
-                $"city_{await GetCacheVersionAsync()}_{plateCode}";
+                $"city_{await GetCacheVersionAsync(cancellationToken)}_{plateCode}";
 
-            var city = await _cacheService.GetAsync<City>(cacheKey);
+            var city = await _cacheService.GetAsync<City>(cacheKey, cancellationToken);
 
             if (city == null)
             {
@@ -369,7 +425,8 @@ namespace CitiesApi.Controllers
         [HttpGet]
         public async Task<IActionResult> GetCities(
             [FromQuery] int page = 1,
-            [FromQuery] int pageSize = 10)
+            [FromQuery] int pageSize = 10,
+            CancellationToken cancellationToken = default)
         {
             if (page < 1 || pageSize < 1 || pageSize > 100)
             {
@@ -384,14 +441,14 @@ namespace CitiesApi.Controllers
             }
 
             // Cache sürümünü al
-            string cacheVersion = await GetCacheVersionAsync();
+            string cacheVersion = await GetCacheVersionAsync(cancellationToken);
 
             // Sayfa ve sayfa boyutuna özel cache anahtarı
             string cacheKey =
                 $"cities_page_{cacheVersion}_{page}_{pageSize}";
 
             // Önce cache kontrolü
-            var cities = await _cacheService.GetAsync<List<City>>(cacheKey);
+            var cities = await _cacheService.GetAsync<List<City>>(cacheKey, cancellationToken);
             if (cities != null)
             {
                 _logger.LogInformation(
@@ -415,13 +472,13 @@ namespace CitiesApi.Controllers
                     .OrderBy(c => c.PlateCode)
                     .Skip((page - 1) * pageSize)
                     .Take(pageSize)
-                    .ToListAsync();
+                    .ToListAsync(cancellationToken);
 
-                await _cacheService.SetAsync(cacheKey, cities);
+                await _cacheService.SetAsync(cacheKey, cities, null, cancellationToken);
             }
 
             // Toplam kayıt sayısı
-            int totalCount = await _context.Cities.CountAsync();
+            int totalCount = await _context.Cities.CountAsync(cancellationToken);
 
             var response = new BasePagedResponse<List<City>>
             {
@@ -443,11 +500,11 @@ namespace CitiesApi.Controllers
             return Ok(response);
         }
 
-        private async Task<string> GetCacheVersionAsync()
+        private async Task<string> GetCacheVersionAsync(CancellationToken cancellationToken)
         {
             string? version =
                 await _cacheService.GetAsync<string>(
-                    CityCacheVersionKey);
+                    CityCacheVersionKey, cancellationToken);
 
             if (version == null)
             {

@@ -1,0 +1,288 @@
+
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CitiesApi | Yönetim Paneli</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <!-- GİRİŞ EKRANI -->
+    <section id="loginView" class="login-view">
+        <div class="login-card">
+            <div class="login-logo">C</div>
+            <h1>CitiesApi</h1>
+            <p>Yönetim paneline hoş geldiniz.</p>
+
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">Kullanıcı adı</label>
+                    <input type="text" id="username" required autocomplete="username">
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Şifre</label>
+                    <input type="password" id="password" required autocomplete="current-password">
+                </div>
+
+                <button type="submit" id="loginButton" class="primary-button full-width">
+                    Giriş Yap
+                </button>
+
+                <p id="loginMessage" class="form-message"></p>
+            </form>
+        </div>
+    </section>
+
+    <!-- YÖNETİM PANELİ -->
+    <div id="dashboardView" class="dashboard hidden">
+
+        <!-- SIDEBAR -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <div class="brand-icon">C</div>
+                <span>CitiesApi</span>
+            </div>
+
+            <div class="sidebar-menu">
+                <p class="menu-title">ANA MENÜ</p>
+
+                <a href="#" class="nav-link active" data-page="dashboard">
+                    <span>▦</span> Dashboard
+                </a>
+
+                <a href="#" class="nav-link" data-page="cities">
+                    <span>⌂</span> Şehirler
+                </a>
+
+                <a href="#" class="nav-link" id="addCityNav">
+                    <span>＋</span> Yeni Şehir Ekle
+                </a>
+            </div>
+
+            <div class="sidebar-bottom">
+                <button id="logoutButton" class="logout-button">
+                    ↪ Çıkış Yap
+                </button>
+            </div>
+        </aside>
+
+        <!-- ANA İÇERİK -->
+        <main class="main-content">
+
+            <!-- TOPBAR -->
+            <header class="topbar">
+                <div>
+                    <h2 id="pageTitle">Dashboard</h2>
+                    <p>Şehir yönetim sistemi</p>
+                </div>
+
+                <div class="topbar-right">
+                    <span id="apiStatus" class="api-status">
+                        ● Bağlantı kontrol ediliyor
+                    </span>
+                    <span id="currentUser" class="user-name">Kullanıcı</span>
+                </div>
+            </header>
+
+            <!-- DASHBOARD SAYFASI -->
+            <section id="dashboardPage" class="page-content">
+
+                <div class="welcome-section">
+                    <div>
+                        <h1>Hoş geldiniz!</h1>
+                        <p>Şehir verilerinizi buradan yönetebilirsiniz.</p>
+                    </div>
+
+                    <button class="primary-button" id="dashboardAddButton">
+                        + Yeni Şehir
+                    </button>
+                </div>
+
+                <!-- İSTATİSTİKLER -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon total-icon">▦</div>
+                        <div>
+                            <p>Toplam Şehir</p>
+                            <h2 id="totalCityCount">0</h2>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon active-icon">✓</div>
+                        <div>
+                            <p>Aktif Şehir</p>
+                            <h2 id="activeCityCount">0</h2>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon passive-icon">−</div>
+                        <div>
+                            <p>Pasif Şehir</p>
+                            <h2 id="passiveCityCount">0</h2>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SON ŞEHİRLER -->
+                <div class="content-card">
+                    <div class="section-header">
+                        <div>
+                            <h3>Şehirler</h3>
+                            <p>Sistemdeki son şehir kayıtları</p>
+                        </div>
+
+                        <button class="secondary-button" id="showAllCitiesButton">
+                            Tümünü Gör
+                        </button>
+                    </div>
+
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Plaka</th>
+                                    <th>Şehir</th>
+                                    <th>Açıklama</th>
+                                    <th>Durum</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dashboardTableBody">
+                                <tr>
+                                    <td colspan="4" class="empty-message">Yükleniyor...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ŞEHİRLER SAYFASI -->
+            <section id="citiesPage" class="page-content hidden">
+
+                <div class="welcome-section">
+                    <div>
+                        <h1>Şehir Yönetimi</h1>
+                        <p>Şehir kayıtlarını görüntüleyin ve yönetin.</p>
+                    </div>
+
+                    <button class="primary-button" id="citiesAddButton">
+                        + Yeni Şehir
+                    </button>
+                </div>
+
+                <div class="content-card">
+
+                    <!-- ARAMA ALANI -->
+                    <div class="search-area">
+                        <div class="search-group">
+                            <label for="keywordSearch">Şehir veya açıklama ara</label>
+                            <input type="text" id="keywordSearch" placeholder="Örn: Trabzon, hamsi...">
+                        </div>
+
+                        <div class="search-group plate-search">
+                            <label for="plateSearch">Plaka kodu</label>
+                            <input type="number" id="plateSearch" min="1" max="81" placeholder="61">
+                        </div>
+
+                        <button class="primary-button" id="searchButton">Ara</button>
+                        <button class="secondary-button" id="clearSearchButton">Temizle</button>
+                    </div>
+
+                    <div class="section-header">
+                        <div>
+                            <h3>Şehir Listesi</h3>
+                            <p id="cityListInfo">Şehir kayıtları</p>
+                        </div>
+                    </div>
+
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Plaka</th>
+                                    <th>Şehir</th>
+                                    <th>Açıklama</th>
+                                    <th>Durum</th>
+                                    <th>İşlemler</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cityTableBody">
+                                <tr>
+                                    <td colspan="5" class="empty-message">Yükleniyor...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div id="pagination" class="pagination"></div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- ŞEHİR EKLEME / DÜZENLEME MODALI -->
+    <div id="cityModal" class="modal hidden">
+        <div class="modal-content">
+
+            <div class="modal-header">
+                <div>
+                    <h2 id="modalTitle">Yeni Şehir</h2>
+                    <p>Şehir bilgilerini doldurun.</p>
+                </div>
+
+                <button type="button" id="closeModalButton" class="close-button">
+                    ×
+                </button>
+            </div>
+
+            <form id="cityForm">
+
+                <div class="form-group">
+                    <label for="cityPlateCode">Plaka Kodu</label>
+                    <input type="number" id="cityPlateCode" min="1" max="81" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="cityName">Şehir Adı</label>
+                    <input type="text" id="cityName" maxlength="100" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="cityDescription">Açıklama</label>
+                    <textarea id="cityDescription" rows="4" maxlength="500"></textarea>
+                </div>
+
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="cityIsActive" checked>
+                    <label for="cityIsActive">Aktif</label>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" id="cancelModalButton" class="secondary-button">
+                        İptal
+                    </button>
+
+                    <button type="submit" id="saveCityButton" class="primary-button">
+                        Kaydet
+                    </button>
+                </div>
+
+                <p id="cityFormMessage" class="form-message"></p>
+            </form>
+        </div>
+    </div>
+
+    <!-- BİLDİRİM -->
+    <div id="toast" class="toast"></div>
+
+    <script src="js/api.js" defer></script>
+    <script src="js/app.js" defer></script>
+
+</body>
+</html>

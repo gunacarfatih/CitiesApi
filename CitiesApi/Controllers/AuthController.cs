@@ -26,13 +26,15 @@ namespace CitiesApi.Controllers
             _tokenService = tokenService;
         }
 
-
         [HttpPost("register")]
         public async Task<IActionResult> Register(
-            [FromBody] RegisterRequest request)
+            [FromBody] RegisterRequest request,
+            CancellationToken cancellationToken)
         {
             var usernameExists = await _context.Users
-                .AnyAsync(u => u.UserName == request.UserName);
+                .AnyAsync(
+                    u => u.UserName == request.UserName,
+                    cancellationToken);
 
             if (usernameExists)
             {
@@ -62,7 +64,7 @@ namespace CitiesApi.Controllers
 
             _context.Users.Add(user);
 
-            await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync(cancellationToken);
 
             return Ok(new BaseResponse<object>
             {
@@ -79,13 +81,15 @@ namespace CitiesApi.Controllers
             });
         }
 
-
         [HttpPost("login")]
         public async Task<IActionResult> Login(
-            [FromBody] LoginRequest request)
+            [FromBody] LoginRequest request,
+            CancellationToken cancellationToken)
         {
             var user = await _context.Users
-                .FirstOrDefaultAsync(u => u.UserName == request.UserName);
+                .FirstOrDefaultAsync(
+                    u => u.UserName == request.UserName,
+                    cancellationToken);
 
             if (user == null || !user.IsActive)
             {
@@ -132,6 +136,5 @@ namespace CitiesApi.Controllers
                 TraceId = HttpContext.TraceIdentifier
             });
         }
-
     }
 }

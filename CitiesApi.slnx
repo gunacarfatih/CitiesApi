@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="CacheProvider/ReusableCaching.csproj" Id="88d3d47f-b595-4392-a0c0-8139bc211b86" />
   <Project Path="CitiesApi/CitiesApi.csproj" />
+  <Project Path="ConsoleClient/ConsoleClient.csproj" Id="5b7aa173-2ce4-4b75-b409-bdcec6ff766d" />
 </Solution>

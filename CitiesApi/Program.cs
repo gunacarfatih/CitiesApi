@@ -17,6 +17,17 @@ using Microsoft.AspNetCore.Mvc;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("FrontendPolicy", policy =>
+    {
+        policy
+            .WithOrigins("http://127.0.0.1:5500")
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+
 // Serilog yapılandırması
 builder.Host.UseSerilog((context, configuration) =>
     configuration.ReadFrom.Configuration(context.Configuration));
@@ -209,6 +220,8 @@ if (app.Environment.IsDevelopment())
 
 // Serilog Request Logging
 app.UseSerilogRequestLogging();
+
+app.UseCors("FrontendPolicy");
 
 // HTTPS
 app.UseHttpsRedirection();
