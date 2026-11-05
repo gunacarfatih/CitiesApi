@@ -27,7 +27,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\CacheProvider\ReusableCaching.csproj" />
+    <ProjectReference Include="..\ReusableCaching\ReusableCaching.csproj" />
   </ItemGroup>
 
 </Project>
